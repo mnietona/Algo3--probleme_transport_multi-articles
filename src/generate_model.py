@@ -1,39 +1,32 @@
 import pandas as pd
 import sys
 
+pd.set_option('display.precision', 16) # voir si possible de modif sur chaque x y 
 
 def read_section(file, nb_items, columns):
     """Lit une section spécifique du fichier et renvoie un DataFrame pandas."""
     data = []
     for _ in range(nb_items):
         item_data = next(file).strip().split()
-        data.append([eval(x) if x.isdigit() or "." in x else x for x in item_data])
+        data.append([float(x) if '.' in x else int(x) if x.isdigit() else x for x in item_data])
     return pd.DataFrame(data, columns=columns)
 
 def read_instance(filename):
     data = {}
     with open(filename, 'r') as file:
         for line in file:
-            line = line.strip()
-            if line.startswith('ITEMS'):
-                data['items'] = int(line.split()[1])
-            elif line.startswith('NODES'):
-                next(file)  # Sauter l'en-tête des colonnes
-                nb_nodes = int(line.split()[1])
-                data['nodes'] = read_section(file, nb_nodes, ['ID', 'x', 'y'])
-            elif line.startswith('EDGES'):
-                next(file)  # Sauter l'en-tête des colonnes
-                nb_edges = int(line.split()[1])
-                data['edges'] = read_section(file, nb_edges, ['ID', 'START', 'END', 'COST_ITEM_0', 'COST_ITEM_1'])
-            elif line.startswith('SOURCES'):
-                next(file)  # Sauter l'en-tête des colonnes
-                nb_sources = int(line.split()[1])
-                data['sources'] = read_section(file, nb_sources, ['ID', 'CAPACITY_ITEM_0', 'CAPACITY_ITEM_1'])
-            elif line.startswith('DESTINATIONS'):
-                next(file)  # Sauter l'en-tête des colonnes
-                nb_destinations = int(line.split()[1])
-                data['destinations'] = read_section(file, nb_destinations, ['ID', 'DEMAND_ITEM_0', 'DEMAND_ITEM_1'])
+            
+            line = line.strip().split(' ')
+            key, nb_items = line[0], line[1] if len(line) > 1 else None
+            
+            if key == 'ITEMS':
+                data['items'] = int(nb_items)
+            elif nb_items is not None:
+                header = next(file).strip().split()
+                nb_items = int(nb_items)
+                data[key.lower()] = read_section(file, nb_items, header)
     return data
+
 
 
 
