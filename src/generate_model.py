@@ -1,8 +1,6 @@
 import pandas as pd
 import sys
 
-pd.set_option('display.precision', 16) # voir si possible de modif sur chaque x y 
-
 def read_section(file, nb_items, columns):
     """Lit une section spécifique du fichier et renvoie un DataFrame pandas."""
     data = []
@@ -28,12 +26,39 @@ def read_instance(filename):
     return data
 
 
+def generate_aggregated_model(data):
+    """Génère le modèle agrégé."""
+    # Construction du modèle CPLEX LP agrégé
+    model_str = ""
+    # Ajoutez la construction du modèle ici
+    return model_str
+
+def generate_disaggregated_model(data):
+    """Génère le modèle désagrégé."""
+    # Construction du modèle CPLEX LP désagrégé
+    model_str = ""
+    # Ajoutez la construction du modèle ici
+    return model_str
 
 
-def generate_lp_file(data, filename, aggregated):
-    # Implémentez la logique pour générer le fichier .lp ici
-    # Utilisez le paramètre 'aggregated' pour choisir entre le modèle agrégé ou désagrégé
-    pass
+def save_model(data, filename, aggregated):
+    """Sauvegarde le modèle dans un fichier."""
+    if aggregated:
+        model_str = generate_aggregated_model(data)
+    else:
+        model_str = generate_disaggregated_model(data)
+    with open(filename, 'w') as file:
+        file.write(model_str)
+    
+    #### Déplacer le fichier dans le dossier parent
+    import shutil
+    shutil.move(filename, f"../{filename}")
+
+def print_data(data):
+    for key, value in data.items():
+        print(key)
+        print(value)
+        print()
 
 if __name__ == "__main__":
     if len(sys.argv) != 3:
@@ -41,16 +66,14 @@ if __name__ == "__main__":
         sys.exit(1)
 
     instance_filename = sys.argv[1]
+    filename = instance_filename.split('/')[-1]
     aggregated = int(sys.argv[2]) == 0  # Convertit le deuxième argument en booléen pour choisir le modèle
 
     # Lire les données d'instance
     data = read_instance(instance_filename)
-    print(data['items'])
-    print(data['nodes'])
-    print(data['edges'])
-    print(data['sources'])
-    print(data['destinations'])
+    print_data(data)
 
     # Générer le fichier .lp
-    #lp_filename = f"{instance_filename.split('.')[0]}_{sys.argv[2]}.lp"
-    #generate_lp_file(data, lp_filename, aggregated)
+    lp_filename =  f"{filename[:-4]}_{sys.argv[2]}.lp"
+    save_model(data, lp_filename, aggregated)
+    
