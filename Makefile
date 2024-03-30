@@ -1,11 +1,18 @@
 .DEFAULT_GOAL := main
+# 1 a 22
+FILE_INDEX = 4
+FILES = $(sort $(wildcard ./instances/*.txt))
+FILE = $(word $(FILE_INDEX), $(FILES))
 
-PROUT = ../instances/test.txt
 AGREE = 0
 
-main:
-	cd src && python3 generate_model.py ../instances/20_2_nonvalidly.txt 0
+BASENAME = $(basename $(notdir $(FILE)))
 
-run:
-	cd src && python3 generate_model.py $(PROUT) $(AGREE)
-	
+LPNAME = $(BASENAME)_0.lp
+OUTNAME = $(BASENAME)_0.sol
+
+main:
+	cd src && python3 generate_model.py .$(FILE) $(AGREE)
+
+test:
+	glpsol --lp $(LPNAME) -o $(OUTNAME)
