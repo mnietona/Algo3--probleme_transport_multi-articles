@@ -4,6 +4,7 @@ import networkx as nx
 import matplotlib.pyplot as plt
 
 def plot_graph(data):
+    """ Code pour afficher le graphe du problème. Donnée par ChatGpt """
     G = nx.DiGraph()
 
     # Ajout des noeuds avec leurs positions
@@ -26,7 +27,6 @@ def plot_graph(data):
     nx.draw_networkx_nodes(G, pos, nodelist=destination_nodes, node_color='red', node_size=500)
 
     plt.show()
-
 
 def read_section(file, nb_items, columns):
     """Lit une section spécifique du fichier et renvoie un DataFrame pandas."""
@@ -52,56 +52,53 @@ def read_instance(filename):
                 data[key.lower()] = read_section(file, nb_items, header)
     return data
 
-
 def generate_aggregated_model(data):
     """Génère le modèle agrégé."""
-    num_items = data['items']
-    
     model_str = "Minimize\nobj:"
+    first_term = True
 
-    # Fonction objectif
+    # Calcul du coût représentatif pour chaque arc
     for index, edge in data['edges'].iterrows():
-        for i in range(num_items):
-            # verfier si cost negatif alors - et non +
-            cost_item_i = float(edge[f'COST_ITEM_{i}'])
-            if cost_item_i < 0:
-                model_str += f" {cost_item_i} x{edge['ID']}_item{i}"
-            else:
-                model_str += f" + {cost_item_i} x{edge['ID']}_item{i}"
-
+        costs = [float(edge[f'COST_ITEM_{i}']) for i in range(data['items'])]
+        representative_cost = sum(costs) / len(costs)  # Utilisation de la moyenne comme coût représentatif
+        if first_term:
+            model_str += f" {abs(representative_cost)} x{edge['ID']}"
+            first_term = False
+        else:
+            model_str += f" + {abs(representative_cost)} x{edge['ID']}"
 
     model_str += "\n\nSubject To\n"
 
-    # Contraintes de capacité des sources
+    # Agrégation et contraintes de capacité pour chaque source
     for index, source in data['sources'].iterrows():
-        for i in range(num_items):
-            constraint_str = ""
-            for _, edge in data['edges'].iterrows():
-                if edge['START'] == source['ID']:
-                    constraint_str += f" + x{edge['ID']}_item{i}"
-            if constraint_str:  # Add the constraint if it's not empty
-                model_str += f" c{source['ID']}_capacity_item{i}:{constraint_str} <= {source[f'CAPACITY_ITEM_{i}']}\n"
+        total_capacity = sum([source[f'CAPACITY_ITEM_{i}'] for i in range(data['items'])])
+        model_str += f"\ncap_{source['ID']}: "
+        outgoing_edges = data['edges'][data['edges']['START'] == source['ID']]
+        for _, edge in outgoing_edges.iterrows():
+            model_str += f" + x{edge['ID']}"
+        model_str += f" <= {total_capacity}"
 
-    # Contraintes de demande des destinations
+    # Agrégation et contraintes de demande pour chaque destination
     for index, destination in data['destinations'].iterrows():
-        for i in range(num_items):
-            constraint_str = ""
-            for _, edge in data['edges'].iterrows():
-                if edge['END'] == destination['ID']:
-                    constraint_str += f" + x{edge['ID']}_item{i}"
-            if constraint_str:  # Add the constraint if it's not empty
-                model_str += f" c{destination['ID']}_demand_item{i}:{constraint_str} >= {destination[f'DEMAND_ITEM_{i}']}\n"
+        total_demand = sum([destination[f'DEMAND_ITEM_{i}'] for i in range(data['items'])])
+        model_str += f"\ndemand_{destination['ID']}: "
+        incoming_edges = data['edges'][data['edges']['END'] == destination['ID']]
+        for _, edge in incoming_edges.iterrows():
+            model_str += f" + x{edge['ID']}"
+        model_str += f" = {total_demand}"
 
-    # Contraintes de non-négativité
-    model_str += "\nBounds\n"
+    # Variables de décision et leurs bornes
+    model_str += "\n\nBounds\n"
     for _, edge in data['edges'].iterrows():
-        for i in range(num_items):
-            model_str += f" 0 <= x{edge['ID']}_item{i}\n"
+        model_str += f"0 <= x{edge['ID']} <= +inf\n"
 
-    model_str += "\nEnd\n"
-    
+    # Définition du type des variables
+    model_str += "\nGenerals\n"
+    for _, edge in data['edges'].iterrows():
+        model_str += f"x{edge['ID']}\n"
+
+    model_str += "\nEnd"
     return model_str
-
 
 def generate_disaggregated_model(data):
     """Génère le modèle désagrégé."""
@@ -109,7 +106,6 @@ def generate_disaggregated_model(data):
     model_str = ""
     # Ajoutez la construction du modèle ici
     return model_str
-
 
 def save_model(data, filename, aggregated):
     """Sauvegarde le modèle dans un fichier."""
@@ -141,10 +137,9 @@ if __name__ == "__main__":
 
     # Lire les données d'instance
     data = read_instance(instance_filename)
-    plot_graph(data)
+    #plot_graph(data)
     #print_data(data)
 
     # Générer le fichier .lp
     lp_filename =  f"{filename[:-4]}_{sys.argv[2]}.lp"
-    #save_model(data, lp_filename, aggregated)
-    
+    save_model(data, lp_filename, aggregated)
