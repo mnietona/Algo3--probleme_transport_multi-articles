@@ -2,6 +2,8 @@ import pandas as pd
 import sys
 import networkx as nx
 import matplotlib.pyplot as plt
+from statistics import median
+
 
 def plot_graph(data):
     """ Code pour afficher le graphe du problème. Donnée par ChatGpt """
@@ -54,23 +56,17 @@ def read_instance(filename):
 
 def generate_aggregated_model(data):
     """Génère le modèle agrégé."""
+    
     model_str = "Minimize\nobj:"
-    first_term = True
-
     # Calcul du coût représentatif pour chaque arc
-    for index, edge in data['edges'].iterrows():
+    for _, edge in data['edges'].iterrows():
         costs = [float(edge[f'COST_ITEM_{i}']) for i in range(data['items'])]
-        representative_cost = sum(costs) / len(costs)  # Utilisation de la moyenne comme coût représentatif
-        if first_term:
-            model_str += f" {abs(representative_cost)} x{edge['ID']}"
-            first_term = False
-        else:
-            model_str += f" + {abs(representative_cost)} x{edge['ID']}"
+        representative_cost = median(costs)  # médiane comme coût représentatif
+        model_str += f" + {abs(representative_cost)} x{edge['ID']}"
 
     model_str += "\n\nSubject To\n"
-
     # Agrégation et contraintes de capacité pour chaque source
-    for index, source in data['sources'].iterrows():
+    for _, source in data['sources'].iterrows():
         total_capacity = sum([source[f'CAPACITY_ITEM_{i}'] for i in range(data['items'])])
         model_str += f"\ncap_{source['ID']}: "
         outgoing_edges = data['edges'][data['edges']['START'] == source['ID']]
@@ -79,7 +75,7 @@ def generate_aggregated_model(data):
         model_str += f" <= {total_capacity}"
 
     # Agrégation et contraintes de demande pour chaque destination
-    for index, destination in data['destinations'].iterrows():
+    for _, destination in data['destinations'].iterrows():
         total_demand = sum([destination[f'DEMAND_ITEM_{i}'] for i in range(data['items'])])
         model_str += f"\ndemand_{destination['ID']}: "
         incoming_edges = data['edges'][data['edges']['END'] == destination['ID']]
@@ -102,9 +98,46 @@ def generate_aggregated_model(data):
 
 def generate_disaggregated_model(data):
     """Génère le modèle désagrégé."""
-    # Construction du modèle CPLEX LP désagrégé
-    model_str = ""
-    # Ajoutez la construction du modèle ici
+    items = range(data['items'])
+    
+    model_str = "Minimize\nobj:"
+    # Minimiser le coût total du transport pour chaque article sur chaque arc
+    for item in items:
+        for _, edge in data['edges'].iterrows():
+            model_str += f" + {abs(int(edge[f'COST_ITEM_{item}']))} x{edge['ID']}_{item}"
+
+    model_str += "\n\nSubject To\n"
+    # Contraintes de capacité pour chaque source et chaque type d'article
+    for _, source in data['sources'].iterrows():
+        for item in items:
+            model_str += f"\ncap_{source['ID']}_{item}: "
+            outgoing_edges = data['edges'][data['edges']['START'] == source['ID']]
+            for _, edge in outgoing_edges.iterrows():
+                model_str += f" + x{edge['ID']}_{item}"
+            model_str += f" <= {source[f'CAPACITY_ITEM_{item}']}"
+
+    # Contraintes de demande pour chaque destination et chaque type d'article
+    for _, destination in data['destinations'].iterrows():
+        for item in items:
+            model_str += f"\ndemand_{destination['ID']}_{item}: "
+            incoming_edges = data['edges'][data['edges']['END'] == destination['ID']]
+            for _, edge in incoming_edges.iterrows():
+                model_str += f" + x{edge['ID']}_{item}"
+            model_str += f" = {destination[f'DEMAND_ITEM_{item}']}"
+
+    # Variables de décision et leurs bornes
+    model_str += "\n\nBounds\n"
+    for item in items:
+        for _, edge in data['edges'].iterrows():
+            model_str += f"0 <= x{edge['ID']}_{item} <= +inf\n"
+
+    # Définition du type des variables
+    model_str += "\nGenerals\n"
+    for item in items:
+        for _, edge in data['edges'].iterrows():
+            model_str += f"x{edge['ID']}_{item}\n"
+
+    model_str += "\nEnd"
     return model_str
 
 def save_model(data, filename, aggregated):
@@ -115,10 +148,6 @@ def save_model(data, filename, aggregated):
         model_str = generate_disaggregated_model(data)
     with open(filename, 'w') as file:
         file.write(model_str)
-    
-    #### Déplacer le fichier dans le dossier parent
-    import shutil
-    shutil.move(filename, f"../{filename}")
 
 def print_data(data):
     for key, value in data.items():
@@ -126,20 +155,25 @@ def print_data(data):
         print(value)
         print()
 
-if __name__ == "__main__":
+def main():
     if len(sys.argv) != 3:
         print("Usage: python generate_model.py <instance_filename> <0 (aggregated) | 1 (disaggregated)>")
         sys.exit(1)
 
     instance_filename = sys.argv[1]
     filename = instance_filename.split('/')[-1]
-    aggregated = int(sys.argv[2]) == 0  # Convertit le deuxième argument en booléen pour choisir le modèle
+    aggregated = int(sys.argv[2]) == 0 # True si agrégé, False si désagrégé
 
     # Lire les données d'instance
     data = read_instance(instance_filename)
-    #plot_graph(data)
-    #print_data(data)
 
     # Générer le fichier .lp
     lp_filename =  f"{filename[:-4]}_{sys.argv[2]}.lp"
     save_model(data, lp_filename, aggregated)
+    
+    # Déplacer le fichier dans le dossier parent
+    import shutil
+    shutil.move(lp_filename, f"../{lp_filename}")
+    
+if __name__ == "__main__":
+    main()

@@ -4,7 +4,7 @@ RESET=\033[0m
 .PHONY: all generate solve clean
 # 1 a 22 = Test
 F = 22
-P = 0
+P = 1
 
 FILES = $(sort $(wildcard ./instances/*.txt))
 FILE = $(word $(F), $(FILES))
