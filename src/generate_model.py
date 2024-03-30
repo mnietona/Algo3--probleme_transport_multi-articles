@@ -28,10 +28,53 @@ def read_instance(filename):
 
 def generate_aggregated_model(data):
     """Génère le modèle agrégé."""
-    # Construction du modèle CPLEX LP agrégé
-    model_str = ""
-    # Ajoutez la construction du modèle ici
+    num_items = data['items']
+    
+    model_str = "Minimize\nobj:"
+
+    # Fonction objectif
+    for index, edge in data['edges'].iterrows():
+        for i in range(num_items):
+            # verfier si cost negatif alors - et non +
+            cost_item_i = float(edge[f'COST_ITEM_{i}'])
+            if cost_item_i < 0:
+                model_str += f" {cost_item_i} x{edge['ID']}_item{i}"
+            else:
+                model_str += f" + {cost_item_i} x{edge['ID']}_item{i}"
+
+
+    model_str += "\n\nSubject To\n"
+
+    # Contraintes de capacité des sources
+    for index, source in data['sources'].iterrows():
+        for i in range(num_items):
+            constraint_str = ""
+            for _, edge in data['edges'].iterrows():
+                if edge['START'] == source['ID']:
+                    constraint_str += f" + x{edge['ID']}_item{i}"
+            if constraint_str:  # Add the constraint if it's not empty
+                model_str += f" c{source['ID']}_capacity_item{i}:{constraint_str} <= {source[f'CAPACITY_ITEM_{i}']}\n"
+
+    # Contraintes de demande des destinations
+    for index, destination in data['destinations'].iterrows():
+        for i in range(num_items):
+            constraint_str = ""
+            for _, edge in data['edges'].iterrows():
+                if edge['END'] == destination['ID']:
+                    constraint_str += f" + x{edge['ID']}_item{i}"
+            if constraint_str:  # Add the constraint if it's not empty
+                model_str += f" c{destination['ID']}_demand_item{i}:{constraint_str} >= {destination[f'DEMAND_ITEM_{i}']}\n"
+
+    # Contraintes de non-négativité
+    model_str += "\nBounds\n"
+    for _, edge in data['edges'].iterrows():
+        for i in range(num_items):
+            model_str += f" 0 <= x{edge['ID']}_item{i}\n"
+
+    model_str += "\nEnd\n"
+    
     return model_str
+
 
 def generate_disaggregated_model(data):
     """Génère le modèle désagrégé."""
@@ -71,7 +114,7 @@ if __name__ == "__main__":
 
     # Lire les données d'instance
     data = read_instance(instance_filename)
-    print_data(data)
+    #print_data(data)
 
     # Générer le fichier .lp
     lp_filename =  f"{filename[:-4]}_{sys.argv[2]}.lp"
