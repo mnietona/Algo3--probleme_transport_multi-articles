@@ -1,5 +1,32 @@
 import pandas as pd
 import sys
+import networkx as nx
+import matplotlib.pyplot as plt
+
+def plot_graph(data):
+    G = nx.DiGraph()
+
+    # Ajout des noeuds avec leurs positions
+    for index, node in data['nodes'].iterrows():
+        G.add_node(node['ID'], pos=(node['x'], node['y']))
+
+    # Ajout des arêtes
+    for index, edge in data['edges'].iterrows():
+        G.add_edge(edge['START'], edge['END'], weight=edge['COST_ITEM_0'])
+
+    pos = nx.get_node_attributes(G, 'pos')
+    # je veux un bleu claire 
+    nx.draw(G, pos, with_labels=True, node_size=500, node_color='lightblue', font_size=8)
+
+    # Colorier les noeuds sources en vert et les noeuds destinations en rouge
+    source_nodes = data['sources']['ID'].tolist()
+    destination_nodes = data['destinations']['ID'].tolist()
+    
+    nx.draw_networkx_nodes(G, pos, nodelist=source_nodes, node_color='green', node_size=500)
+    nx.draw_networkx_nodes(G, pos, nodelist=destination_nodes, node_color='red', node_size=500)
+
+    plt.show()
+
 
 def read_section(file, nb_items, columns):
     """Lit une section spécifique du fichier et renvoie un DataFrame pandas."""
@@ -114,9 +141,10 @@ if __name__ == "__main__":
 
     # Lire les données d'instance
     data = read_instance(instance_filename)
+    plot_graph(data)
     #print_data(data)
 
     # Générer le fichier .lp
     lp_filename =  f"{filename[:-4]}_{sys.argv[2]}.lp"
-    save_model(data, lp_filename, aggregated)
+    #save_model(data, lp_filename, aggregated)
     
