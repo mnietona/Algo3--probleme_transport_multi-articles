@@ -54,35 +54,77 @@ def read_instance(filename):
                 data[key.lower()] = read_section(file, nb_items, header)
     return data
 
+def check_balanced_aggregated(data):
+    """Vérifie si le problème est équilibré."""
+    total_supply = 0 
+    total_demand = 0
+    
+    for _, df in data.items():
+        if isinstance(df, pd.DataFrame):
+            for column in df.columns:
+                if 'CAPACITY' in column:
+                    total_supply += df[column].sum()
+                elif 'DEMAND' in column:
+                    total_demand += df[column].sum()
+
+    if total_supply == total_demand:
+        return "=", "="
+    elif total_supply > total_demand:
+        return  "<=", "="
+    else:
+        return  "=" ,"<="
+    
 def generate_aggregated_model(data):
     """Génère le modèle agrégé."""
+    
+    all_nodes = set(data['edges']['START']).union(set(data['edges']['END']))
+    sources = set(data['sources']['ID'])
+    destinations = set(data['destinations']['ID'])
+    intermediate_nodes = all_nodes - sources - destinations
+    
+    source_signe, destination_signe = check_balanced_aggregated(data)
     
     model_str = "Minimize\nobj:"
     # Calcul du coût représentatif pour chaque arc
     for _, edge in data['edges'].iterrows():
         costs = [float(edge[f'COST_ITEM_{i}']) for i in range(data['items'])]
         representative_cost = median(costs)  # médiane comme coût représentatif
-        model_str += f" + {abs(representative_cost)} x{edge['ID']}"
-
+        model_str += f" {'-' if representative_cost < 0 else '+'} {abs(representative_cost)} x{edge['ID']}"
+    
     model_str += "\n\nSubject To\n"
-    # Agrégation et contraintes de capacité pour chaque source
+    # Contraintes de capacité pour chaque source
     for _, source in data['sources'].iterrows():
         total_capacity = sum([source[f'CAPACITY_ITEM_{i}'] for i in range(data['items'])])
         model_str += f"\ncap_{source['ID']}: "
         outgoing_edges = data['edges'][data['edges']['START'] == source['ID']]
-        for _, edge in outgoing_edges.iterrows():
-            model_str += f" + x{edge['ID']}"
-        model_str += f" <= {total_capacity}"
+        edge_str = " + ".join([f"x{edge['ID']}" for _, edge in outgoing_edges.iterrows()])
+        model_str += f"{edge_str} {source_signe} {total_capacity}"
+    
+    # Contraintes de conservation du flux pour les nœuds intermédiaires
+    for node in intermediate_nodes:
+        in_edges = data['edges'][data['edges']['END'] == node]
+        out_edges = data['edges'][data['edges']['START'] == node]
 
-    # Agrégation et contraintes de demande pour chaque destination
+        in_edge_ids = {edge['ID'] for _, edge in in_edges.iterrows()}
+        out_edge_ids = {edge['ID'] for _, edge in out_edges.iterrows()}
+        
+        common_edge_ids = in_edge_ids & out_edge_ids
+        in_edge_ids -= common_edge_ids
+        out_edge_ids -= common_edge_ids
+
+        in_flow_str = " + ".join([f"x{edge_id}" for edge_id in in_edge_ids])
+        out_flow_str = " - ".join([f"x{edge_id}" for edge_id in out_edge_ids])
+        
+        model_str += f"\nflow_conservation_{node}: {in_flow_str} - {out_flow_str} = 0"
+    
+    # Contraintes de demande pour chaque destination
     for _, destination in data['destinations'].iterrows():
         total_demand = sum([destination[f'DEMAND_ITEM_{i}'] for i in range(data['items'])])
         model_str += f"\ndemand_{destination['ID']}: "
         incoming_edges = data['edges'][data['edges']['END'] == destination['ID']]
-        for _, edge in incoming_edges.iterrows():
-            model_str += f" + x{edge['ID']}"
-        model_str += f" = {total_demand}"
-
+        edge_str = " + ".join([f"x{edge['ID']}" for _, edge in incoming_edges.iterrows()])
+        model_str += f"{edge_str} {destination_signe} {total_demand}"
+    
     # Variables de décision et leurs bornes
     model_str += "\n\nBounds\n"
     for _, edge in data['edges'].iterrows():
@@ -166,6 +208,7 @@ def main():
 
     # Lire les données d'instance
     data = read_instance(instance_filename)
+   #plot_graph(data)
 
     # Générer le fichier .lp
     lp_filename =  f"{filename[:-4]}_{sys.argv[2]}.lp"
