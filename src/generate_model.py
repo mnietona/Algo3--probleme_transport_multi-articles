@@ -76,22 +76,84 @@ def check_balanced_aggregated(data):
     
 def generate_aggregated_model(data):
     """Génère le modèle agrégé."""
-    
+
     all_nodes = set(data['edges']['START']).union(set(data['edges']['END']))
     sources = set(data['sources']['ID'])
     destinations = set(data['destinations']['ID'])
     intermediate_nodes = all_nodes - sources - destinations
-    
     source_signe, destination_signe = check_balanced_aggregated(data)
     
     model_str = "Minimize\nobj:"
+    model_str = calculate_representative_edge_costs(data, model_str)
+
+    model_str += "\n\nSubject To\n"
+    model_str = source_capacity_constraint(data, model_str, source_signe)
+    model_str = intermediate_nodes_flow_constraints(data, intermediate_nodes, model_str)
+    model_str = destination_demand_constraints(data, destination_signe, model_str)
+    model_str = define_decision_variable_bounds(data, model_str)
+    model_str = define_variable_types(data, model_str)
+
+    model_str += "\nEnd"
+    return model_str
+
+
+def define_decision_variable_bounds(data, model_str):
+    # Variables de décision et leurs bornes
+    model_str += "\n\nBounds\n"
+    for _, edge in data['edges'].iterrows():
+        model_str += f"0 <= x{edge['ID']} <= +inf\n"
+    return model_str
+
+
+def define_variable_types(data, model_str):
+    # Définition du type des variables
+    model_str += "\nGenerals\n"
+    for _, edge in data['edges'].iterrows():
+        model_str += f"x{edge['ID']}\n"
+    return model_str
+
+
+def calculate_representative_edge_costs(data, model_str):
     # Calcul du coût représentatif pour chaque arc
     for _, edge in data['edges'].iterrows():
         costs = [float(edge[f'COST_ITEM_{i}']) for i in range(data['items'])]
         representative_cost = median(costs)  # médiane comme coût représentatif
         model_str += f" {'-' if representative_cost < 0 else '+'} {abs(representative_cost)} x{edge['ID']}"
-    
-    model_str += "\n\nSubject To\n"
+    return model_str
+
+
+def destination_demand_constraints(data, destination_signe, model_str):
+    # Contraintes de demande pour chaque destination
+    for _, destination in data['destinations'].iterrows():
+        demands = [destination[f'DEMAND_ITEM_{i}'] for i in range(data['items'])]
+        total_demand = sum(demands)
+        model_str += f"\ndemand_{destination['ID']}: "
+        incoming_edges = data['edges'][data['edges']['END'] == destination['ID']]
+        edge_str = " + ".join([f"x{edge['ID']}" for _, edge in incoming_edges.iterrows()])
+        model_str += f"{edge_str} {destination_signe} {total_demand}"
+    return model_str
+
+
+def intermediate_nodes_flow_constraints(data, intermediate_nodes, model_str):
+    # Contraintes de conservation du flux pour les nœuds intermédiaires
+    for node in intermediate_nodes:
+        in_edges = data['edges'][data['edges']['END'] == node]
+        out_edges = data['edges'][data['edges']['START'] == node]
+        in_edge_ids = {edge['ID'] for _, edge in in_edges.iterrows()}
+        out_edge_ids = {edge['ID'] for _, edge in out_edges.iterrows()}
+
+        common_edge_ids = in_edge_ids & out_edge_ids
+        in_edge_ids -= common_edge_ids
+        out_edge_ids -= common_edge_ids
+
+        in_flow_str = " + ".join([f"x{edge_id}" for edge_id in in_edge_ids])
+        out_flow_str = " - ".join([f"x{edge_id}" for edge_id in out_edge_ids])
+
+        model_str += f"\nflow_conservation_{node}: {in_flow_str} - {out_flow_str} = 0"
+    return model_str
+
+
+def source_capacity_constraint(data, model_str, source_signe):
     # Contraintes de capacité pour chaque source
     for _, source in data['sources'].iterrows():
         total_capacity = sum([source[f'CAPACITY_ITEM_{i}'] for i in range(data['items'])])
@@ -99,44 +161,8 @@ def generate_aggregated_model(data):
         outgoing_edges = data['edges'][data['edges']['START'] == source['ID']]
         edge_str = " + ".join([f"x{edge['ID']}" for _, edge in outgoing_edges.iterrows()])
         model_str += f"{edge_str} {source_signe} {total_capacity}"
-    
-    # Contraintes de conservation du flux pour les nœuds intermédiaires
-    for node in intermediate_nodes:
-        in_edges = data['edges'][data['edges']['END'] == node]
-        out_edges = data['edges'][data['edges']['START'] == node]
-
-        in_edge_ids = {edge['ID'] for _, edge in in_edges.iterrows()}
-        out_edge_ids = {edge['ID'] for _, edge in out_edges.iterrows()}
-        
-        common_edge_ids = in_edge_ids & out_edge_ids
-        in_edge_ids -= common_edge_ids
-        out_edge_ids -= common_edge_ids
-
-        in_flow_str = " + ".join([f"x{edge_id}" for edge_id in in_edge_ids])
-        out_flow_str = " - ".join([f"x{edge_id}" for edge_id in out_edge_ids])
-        
-        model_str += f"\nflow_conservation_{node}: {in_flow_str} - {out_flow_str} = 0"
-    
-    # Contraintes de demande pour chaque destination
-    for _, destination in data['destinations'].iterrows():
-        total_demand = sum([destination[f'DEMAND_ITEM_{i}'] for i in range(data['items'])])
-        model_str += f"\ndemand_{destination['ID']}: "
-        incoming_edges = data['edges'][data['edges']['END'] == destination['ID']]
-        edge_str = " + ".join([f"x{edge['ID']}" for _, edge in incoming_edges.iterrows()])
-        model_str += f"{edge_str} {destination_signe} {total_demand}"
-    
-    # Variables de décision et leurs bornes
-    model_str += "\n\nBounds\n"
-    for _, edge in data['edges'].iterrows():
-        model_str += f"0 <= x{edge['ID']} <= +inf\n"
-
-    # Définition du type des variables
-    model_str += "\nGenerals\n"
-    for _, edge in data['edges'].iterrows():
-        model_str += f"x{edge['ID']}\n"
-
-    model_str += "\nEnd"
     return model_str
+
 
 def generate_disaggregated_model(data):
     """Génère le modèle désagrégé."""
@@ -208,7 +234,7 @@ def main():
 
     # Lire les données d'instance
     data = read_instance(instance_filename)
-   #plot_graph(data)
+    plot_graph(data)
 
     # Générer le fichier .lp
     lp_filename =  f"{filename[:-4]}_{sys.argv[2]}.lp"
