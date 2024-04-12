@@ -54,33 +54,13 @@ def read_instance(filename):
                 data[key.lower()] = read_section(file, nb_items, header)
     return data
 
-def verify_balanced_aggregated(data):
-    """Vérifie si le problème est équilibré."""
-    total_supply = 0 
-    total_demand = 0
-    
-    for _, df in data.items():
-        if isinstance(df, pd.DataFrame):
-            for column in df.columns:
-                if 'CAPACITY' in column:
-                    total_supply += df[column].sum()
-                elif 'DEMAND' in column:
-                    total_demand += df[column].sum()
-
-    if total_supply == total_demand:
-        return "=", "="
-    elif total_supply > total_demand:
-        return  "<=", "="
-    else:
-        return  "=" ,"<="
-    
 def generate_aggregated_model(data):
     """Génère le modèle agrégé."""
     
     model_str = "Minimize\nobj:"
     model_str = calculate_representative_edge_costs(data, model_str)
 
-    model_str += "\n\nSubject To\n"
+    model_str += "\n\nSubject To"
     source_sign, destination_sign = verify_balanced_aggregated(data)
     model_str = source_capacity_constraint(data, model_str, source_sign)
     
@@ -101,6 +81,26 @@ def generate_aggregated_model(data):
     model_str += "\nEnd"
     return model_str
 
+def verify_balanced_aggregated(data):
+    """Vérifie si le problème est équilibré."""
+    total_supply = 0 
+    total_demand = 0
+    
+    for _, df in data.items():
+        if isinstance(df, pd.DataFrame):
+            for column in df.columns:
+                if 'CAPACITY' in column:
+                    total_supply += df[column].sum()
+                elif 'DEMAND' in column:
+                    total_demand += df[column].sum()
+
+    if total_supply == total_demand:
+        return "=", "="
+    elif total_supply > total_demand:
+        return  "<=", "="
+    else:
+        return  "=" ,"<="
+    
 def calculate_representative_edge_costs(data, model_str):
     """ Calcule le coût représentatif de chaque arc. """
     for _, edge in data['edges'].iterrows():
