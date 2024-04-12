@@ -109,13 +109,28 @@ def calculate_representative_edge_costs(data, model_str):
     return model_str
 
 def source_capacity_constraint(data, model_str, source_signe):
-    """ Contraintes de capacité pour chaque source."""
+    """Capacity constraints for each source, accounting for incoming and outgoing edges."""
     for _, source in data['sources'].iterrows():
         total_capacity = sum([source[f'CAPACITY_ITEM_{i}'] for i in range(data['items'])])
         model_str += f"\ncap_{source['ID']}: "
+
         outgoing_edges = data['edges'][data['edges']['START'] == source['ID']]
-        edge_str = " + ".join([f"x{edge['ID']}" for _, edge in outgoing_edges.iterrows()])
-        model_str += f"{edge_str} {source_signe} {total_capacity}"
+        incoming_edges = data['edges'][data['edges']['END'] == source['ID']]
+        
+        outgoing_edge_ids = set(outgoing_edges['ID'])
+        incoming_edge_ids = set(incoming_edges['ID'])
+
+        common_edge_ids = outgoing_edge_ids & incoming_edge_ids
+        outgoing_edge_ids -= common_edge_ids
+        incoming_edge_ids -= common_edge_ids
+
+        outgoing_edge_str = " + ".join([f"x{edge_id}" for edge_id in outgoing_edge_ids])
+        incoming_edge_str = " - ".join([f"x{edge_id}" for edge_id in incoming_edge_ids])
+
+        if incoming_edge_str:
+            model_str += f"{outgoing_edge_str} - {incoming_edge_str} {source_signe} {total_capacity}"
+        else:
+            model_str += f"{outgoing_edge_str} {source_signe} {total_capacity}"
     return model_str
 
 def intermediate_nodes_flow_constraints(data, intermediate_nodes, model_str):
@@ -133,18 +148,33 @@ def intermediate_nodes_flow_constraints(data, intermediate_nodes, model_str):
         in_flow_str = " + ".join([f"x{edge_id}" for edge_id in in_edge_ids])
         out_flow_str = " - ".join([f"x{edge_id}" for edge_id in out_edge_ids])
 
-        model_str += f"\nflow_conservation_{node}: {in_flow_str} - {out_flow_str} = 0"
+        model_str += f"\nflow_cons_{node}: {in_flow_str} - {out_flow_str} = 0"
     return model_str
 
 def destination_demand_constraints(data, destination_signe, model_str):
-    """ Contraintes de demande pour chaque destination."""
+    """ Contraintes de demande pour chaque destination, incluant les arcs entrants et sortants."""
     for _, destination in data['destinations'].iterrows():
         demands = [destination[f'DEMAND_ITEM_{i}'] for i in range(data['items'])]
         total_demand = sum(demands)
         model_str += f"\ndemand_{destination['ID']}: "
+
         incoming_edges = data['edges'][data['edges']['END'] == destination['ID']]
-        edge_str = " + ".join([f"x{edge['ID']}" for _, edge in incoming_edges.iterrows()])
-        model_str += f"{edge_str} {destination_signe} {total_demand}"
+        outgoing_edges = data['edges'][data['edges']['START'] == destination['ID']]
+        
+        outgoing_edge_ids = set(outgoing_edges['ID'])
+        incoming_edge_ids = set(incoming_edges['ID'])
+
+        common_edge_ids = outgoing_edge_ids & incoming_edge_ids
+        outgoing_edge_ids -= common_edge_ids
+        incoming_edge_ids -= common_edge_ids
+
+        incoming_edge_str = " + ".join([f"x{edge_id}" for edge_id in incoming_edge_ids])
+        outgoing_edge_str = " - ".join([f"x{edge_id}" for edge_id in outgoing_edge_ids])
+        
+        if outgoing_edge_str:
+            model_str += f"{incoming_edge_str} - {outgoing_edge_str} {destination_signe} {total_demand}"
+        else:
+            model_str += f"{incoming_edge_str} {destination_signe} {total_demand}"
     return model_str
 
 def define_decision_variable_bounds(data, model_str):
@@ -204,7 +234,6 @@ def verify_balanced_disaggregated(data):
                 for col in demand_columns:
                     total_demand[i] += df[col].sum()
 
-    print(total_supply, total_demand)
     for i in range(data['items']):
         if total_supply[i] == total_demand[i]:
             balance_status[i] = ("=", "=")
@@ -224,13 +253,28 @@ def calculate_edge_costs_by_item(data, model_str):
     return model_str
 
 def source_capacity_constraint_by_item(data, balance_status, model_str):
-    """Contraintes de capacité pour chaque source et chaque type d'article."""
+    """Capacity constraints for each source and each item type, ensuring no overlap in edge IDs for in-flow and out-flow."""
     for _, source in data['sources'].iterrows():
         for i in range(data['items']):
             capacity = source[f'CAPACITY_ITEM_{i}']
             outgoing_edges = data['edges'][data['edges']['START'] == source['ID']]
-            edge_str = " + ".join([f"x{edge['ID']}_{i}" for _, edge in outgoing_edges.iterrows()])
-            model_str += f"\ncap_{source['ID']}_{i}: {edge_str} {balance_status[i][0]} {capacity}"
+            incoming_edges = data['edges'][data['edges']['END'] == source['ID']]
+
+            outgoing_edge_ids = set(outgoing_edges['ID'])
+            incoming_edge_ids = set(incoming_edges['ID'])
+
+            # Remove edges that appear in both outgoing and incoming sets to avoid counting them twice
+            common_edge_ids = outgoing_edge_ids & incoming_edge_ids
+            outgoing_edge_ids -= common_edge_ids
+            incoming_edge_ids -= common_edge_ids
+
+            outgoing_edge_str = " + ".join([f"x{edge.ID}_{i}" for edge in outgoing_edges.itertuples() if edge.ID in outgoing_edge_ids])
+            incoming_edge_str = " - ".join([f"x{edge.ID}_{i}" for edge in incoming_edges.itertuples() if edge.ID in incoming_edge_ids])
+
+            if incoming_edge_str:
+                model_str += f"\ncap_{source['ID']}_{i}: {outgoing_edge_str} - {incoming_edge_str} {balance_status[i][0]} {capacity}"
+            else:
+                model_str += f"\ncap_{source['ID']}_{i}: {outgoing_edge_str} {balance_status[i][0]} {capacity}"
     return model_str
 
 def intermediate_nodes_flow_constraints_by_item(data, intermediate_nodes, model_str):
@@ -250,19 +294,35 @@ def intermediate_nodes_flow_constraints_by_item(data, intermediate_nodes, model_
             in_flow_str = " + ".join([f"x{edge_id}_{i}" for edge_id in in_edge_ids])
             out_flow_str = " - ".join([f"x{edge_id}_{i}" for edge_id in out_edge_ids])
             
-            model_str += f"\nflow_conservation_{node}_{i}: {in_flow_str} - {out_flow_str} = 0"
+            model_str += f"\nflow_cons_{node}_{i}: {in_flow_str} - {out_flow_str} = 0"
 
     return model_str
 
 def destination_demand_constraints_by_item(data, balance_status, model_str):
-    """Contraintes de demande pour chaque destination et chaque type d'article."""
+    """Demand constraints for each destination and each item type, ensuring no overlap in edge IDs for incoming and outgoing flows."""
     for _, destination in data['destinations'].iterrows():
         for i in range(data['items']):
             demand = destination[f'DEMAND_ITEM_{i}']
             incoming_edges = data['edges'][data['edges']['END'] == destination['ID']]
-            edge_str = " + ".join([f"x{edge['ID']}_{i}" for _, edge in incoming_edges.iterrows()])
-            model_str += f"\ndemand_{destination['ID']}_{i}: {edge_str} {balance_status[i][1]} {demand}"
+            outgoing_edges = data['edges'][data['edges']['START'] == destination['ID']]
+
+            incoming_edge_ids = set(incoming_edges['ID'])
+            outgoing_edge_ids = set(outgoing_edges['ID'])
+
+            # Remove edges that appear in both incoming and outgoing sets to avoid counting them twice
+            common_edge_ids = incoming_edge_ids & outgoing_edge_ids
+            incoming_edge_ids -= common_edge_ids
+            outgoing_edge_ids -= common_edge_ids
+
+            incoming_edge_str = " + ".join([f"x{edge.ID}_{i}" for edge in incoming_edges.itertuples() if edge.ID in incoming_edge_ids])
+            outgoing_edge_str = " - ".join([f"x{edge.ID}_{i}" for edge in outgoing_edges.itertuples() if edge.ID in outgoing_edge_ids])
+
+            if outgoing_edge_str:
+                model_str += f"\ndemand_{destination['ID']}_{i}: {incoming_edge_str} - {outgoing_edge_str} {balance_status[i][1]} {demand}"
+            else:
+                model_str += f"\ndemand_{destination['ID']}_{i}: {incoming_edge_str} {balance_status[i][1]} {demand}"
     return model_str
+
 
 def define_decision_variable_bounds_by_item(data, model_str):
     """Définit les bornes des variables de décision pour chaque arc et chaque type d'article."""
