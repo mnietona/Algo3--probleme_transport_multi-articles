@@ -263,7 +263,6 @@ def source_capacity_constraint_by_item(data, balance_status, model_str):
             outgoing_edge_ids = set(outgoing_edges['ID'])
             incoming_edge_ids = set(incoming_edges['ID'])
 
-            # Remove edges that appear in both outgoing and incoming sets to avoid counting them twice
             common_edge_ids = outgoing_edge_ids & incoming_edge_ids
             outgoing_edge_ids -= common_edge_ids
             incoming_edge_ids -= common_edge_ids
@@ -309,7 +308,6 @@ def destination_demand_constraints_by_item(data, balance_status, model_str):
             incoming_edge_ids = set(incoming_edges['ID'])
             outgoing_edge_ids = set(outgoing_edges['ID'])
 
-            # Remove edges that appear in both incoming and outgoing sets to avoid counting them twice
             common_edge_ids = incoming_edge_ids & outgoing_edge_ids
             incoming_edge_ids -= common_edge_ids
             outgoing_edge_ids -= common_edge_ids
