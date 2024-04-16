@@ -132,7 +132,7 @@ def get_intermediate_nodes(data):
     intermediate_nodes = all_nodes - sources - destinations
     return intermediate_nodes
 
-def get_edge_str(edges, ids, item_suffix=""):
+def get_edge_str(edges, ids, item_suffix):
     """Crée un str de la forme 'x1 + x2 + ...' pour les arcs donnés."""
     return " + ".join([f"x{edge_id}{item_suffix}" for edge_id in ids if edge_id in set(edges['ID'])])
 
@@ -242,7 +242,6 @@ def define_variable_types(data, model_str, aggregated=True):
             for i in range(data['items']):
                 model_str += f"x{edge['ID']}_{i}\n"
     return model_str
-
 
 def main():
     if len(sys.argv) != 3:
