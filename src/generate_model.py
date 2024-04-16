@@ -124,26 +124,6 @@ def calculate_edge_costs(data, model_str, aggregated=True):
                 model_str += f" {'-' if cost < 0 else '+'} {abs(cost)} x{edge['ID']}_{i}"
     return model_str
 
-def define_decision_variable_bounds(data, model_str, aggregated=True):
-    """ Définit les bornes des variables de décision. """
-    for _, edge in data['edges'].iterrows():
-        if aggregated:
-            model_str += f"0 <= x{edge['ID']} <= +inf\n"
-        else:
-            for i in range(data['items']):
-                model_str += f"0 <= x{edge['ID']}_{i} <= +inf\n"
-    return model_str
-
-def define_variable_types(data, model_str, aggregated=True):
-    """ Définit le type des variables de décision. """
-    for _, edge in data['edges'].iterrows():
-        if aggregated:
-            model_str += f"x{edge['ID']}\n"
-        else:
-            for i in range(data['items']):
-                model_str += f"x{edge['ID']}_{i}\n"
-    return model_str
-
 def get_intermediate_nodes(data):
     """ Renvoie les nœuds intermédiaires du graphe. """
     all_nodes = set(data['edges']['START']).union(set(data['edges']['END']))
@@ -241,6 +221,26 @@ def model_constraints(data, model_str, aggregated=True):
     model_str = process_constraints(data, model_str, 'sources', balance_signs, aggregated=aggregated)
     model_str = intermediate_nodes_flow_constraints(data, model_str, aggregated=aggregated)
     model_str = process_constraints(data, model_str, 'destinations', balance_signs, aggregated=aggregated)
+    return model_str
+
+def define_decision_variable_bounds(data, model_str, aggregated=True):
+    """ Définit les bornes des variables de décision. """
+    for _, edge in data['edges'].iterrows():
+        if aggregated:
+            model_str += f"0 <= x{edge['ID']} <= +inf\n"
+        else:
+            for i in range(data['items']):
+                model_str += f"0 <= x{edge['ID']}_{i} <= +inf\n"
+    return model_str
+
+def define_variable_types(data, model_str, aggregated=True):
+    """ Définit le type des variables de décision. """
+    for _, edge in data['edges'].iterrows():
+        if aggregated:
+            model_str += f"x{edge['ID']}\n"
+        else:
+            for i in range(data['items']):
+                model_str += f"x{edge['ID']}_{i}\n"
     return model_str
 
 
