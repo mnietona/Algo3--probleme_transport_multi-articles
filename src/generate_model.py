@@ -54,22 +54,93 @@ def read_instance(filename):
                 data[key.lower()] = read_section(file, nb_items, header)
     return data
 
+def verify_balanced_aggregated(data):
+    """ Verifie si le problème agrégé est équilibré. """
+    return check_balance(data, 'CAPACITY', 'DEMAND')
+
+def verify_balanced_disaggregated(data):
+    """ Verifie si le problème désagrégé est équilibré. """
+    balance_status = {}
+    for i in range(data['items']):
+        balance_status[i] = check_balance(data, f'CAPACITY_ITEM_{i}', f'DEMAND_ITEM_{i}')
+    return balance_status
+
+def check_balance(data, supply_key, demand_key):
+    """ Vérifie si l'offre est égale à la demande. """
+    total_supply = total_demand = 0
+    for _, df in data.items():
+        if isinstance(df, pd.DataFrame):
+            supply_columns = [col for col in df.columns if supply_key in col]
+            demand_columns = [col for col in df.columns if demand_key in col]
+            for col in supply_columns:
+                total_supply += df[col].sum()
+            for col in demand_columns:
+                total_demand += df[col].sum()
+    
+
+    if total_supply == total_demand:
+        return "=", "="
+    elif total_supply > total_demand:
+        return "<=", "="
+    else:
+        return "=", "<="
+
+def calculate_edge_costs(data, model_str, aggregated=True):
+    """
+    Calcule et ajoute les coûts par arc.
+    Si mode='aggregated', utilise la médiane des coûts pour un coût représentatif.
+    Si mode='disaggregated', calcule les coûts par item et les ajoute pour chaque item.
+    """
+    for _, edge in data['edges'].iterrows():
+        if aggregated:
+            costs = [float(edge[f'COST_ITEM_{i}']) for i in range(data['items'])]
+            representative_cost = median(costs)
+            model_str += f" {'-' if representative_cost < 0 else '+'} {abs(representative_cost)} x{edge['ID']}"
+        else:
+            for i in range(data['items']):
+                cost = float(edge[f'COST_ITEM_{i}'])
+                model_str += f" {'-' if cost < 0 else '+'} {abs(cost)} x{edge['ID']}_{i}"
+    return model_str
+
+def define_decision_variable_bounds(data, model_str, aggregated=True):
+    """ Définit les bornes des variables de décision. """
+    for _, edge in data['edges'].iterrows():
+        if aggregated:
+            model_str += f"0 <= x{edge['ID']} <= +inf\n"
+        else:
+            for i in range(data['items']):
+                model_str += f"0 <= x{edge['ID']}_{i} <= +inf\n"
+    return model_str
+
+def define_variable_types(data, model_str, aggregated=True):
+    """ Définit le type des variables de décision. """
+    for _, edge in data['edges'].iterrows():
+        if aggregated:
+            model_str += f"x{edge['ID']}\n"
+        else:
+            for i in range(data['items']):
+                model_str += f"x{edge['ID']}_{i}\n"
+    return model_str
+
+def get_intermediate_nodes(data):
+        all_nodes = set(data['edges']['START']).union(set(data['edges']['END']))
+        sources = set(data['sources']['ID'])
+        destinations = set(data['destinations']['ID'])
+        intermediate_nodes = all_nodes - sources - destinations
+        return intermediate_nodes
+
 def generate_aggregated_model(data):
     """Génère le modèle agrégé."""
     model_str = "Minimize\nobj:"
-    model_str = calculate_representative_edge_costs(data, model_str)
+    model_str = calculate_edge_costs(data, model_str)
 
     model_str += "\n\nSubject To"
     source_sign, destination_sign = verify_balanced_aggregated(data)
     model_str = source_capacity_constraint(data, model_str, source_sign)
     
-    all_nodes = set(data['edges']['START']).union(set(data['edges']['END']))
-    sources = set(data['sources']['ID'])
-    destinations = set(data['destinations']['ID'])
-    intermediate_nodes = all_nodes - sources - destinations
-    model_str = intermediate_nodes_flow_constraints(data, intermediate_nodes, model_str)
+    model_str = intermediate_nodes_flow_constraints(data, model_str)
     
-    model_str = destination_demand_constraints(data, destination_sign, model_str)
+    model_str = destination_demand_constraints(data, model_str, destination_sign,)
     
     model_str += "\n\nBounds\n"
     model_str = define_decision_variable_bounds(data, model_str)
@@ -80,33 +151,29 @@ def generate_aggregated_model(data):
     model_str += "\nEnd"
     return model_str
 
-def verify_balanced_aggregated(data):
-    """Vérifie si le problème est équilibré."""
-    total_supply = 0 
-    total_demand = 0
-    
-    for _, df in data.items():
-        if isinstance(df, pd.DataFrame):
-            for column in df.columns:
-                if 'CAPACITY' in column:
-                    total_supply += df[column].sum()
-                elif 'DEMAND' in column:
-                    total_demand += df[column].sum()
+def generate_disaggregated_model(data):
+    """Génère le modèle désagrégé."""
+    model_str = "Minimize\nobj:"
+    model_str = calculate_edge_costs(data, model_str, aggregated=False)
 
-    if total_supply == total_demand:
-        return "=", "="
-    elif total_supply > total_demand:
-        return  "<=", "="
-    else:
-        return  "=" ,"<="
+    model_str += "\n\nSubject To"
+    balance_status = verify_balanced_disaggregated(data)
     
-def calculate_representative_edge_costs(data, model_str):
-    """ Calcule le coût représentatif de chaque arc. """
-    for _, edge in data['edges'].iterrows():
-        costs = [float(edge[f'COST_ITEM_{i}']) for i in range(data['items'])]
-        representative_cost = median(costs)  # médiane comme coût représentatif
-        model_str += f" {'-' if representative_cost < 0 else '+'} {abs(representative_cost)} x{edge['ID']}"
+    model_str = source_capacity_constraint_by_item(data, model_str, balance_status)
+    
+    model_str = intermediate_nodes_flow_constraints_by_item(data, model_str)
+
+    model_str = destination_demand_constraints_by_item(data, model_str, balance_status)
+
+    model_str += "\n\nBounds\n"
+    model_str = define_decision_variable_bounds(data, model_str, aggregated=False)
+    
+    model_str += "\nGenerals\n"
+    model_str = define_variable_types(data, model_str, aggregated=False)
+    
+    model_str += "\nEnd"
     return model_str
+
 
 def source_capacity_constraint(data, model_str, source_signe):
     """Capacity constraints for each source, accounting for incoming and outgoing edges."""
@@ -133,8 +200,9 @@ def source_capacity_constraint(data, model_str, source_signe):
             model_str += f"{outgoing_edge_str} {source_signe} {total_capacity}"
     return model_str
 
-def intermediate_nodes_flow_constraints(data, intermediate_nodes, model_str):
+def intermediate_nodes_flow_constraints(data, model_str):
     """ Contraintes de conservation de flux pour chaque noeud intermédiaire."""
+    intermediate_nodes = get_intermediate_nodes(data)
     for node in intermediate_nodes:
         in_edges = data['edges'][data['edges']['END'] == node]
         out_edges = data['edges'][data['edges']['START'] == node]
@@ -151,7 +219,7 @@ def intermediate_nodes_flow_constraints(data, intermediate_nodes, model_str):
         model_str += f"\nflow_cons_{node}: {in_flow_str} - {out_flow_str} = 0"
     return model_str
 
-def destination_demand_constraints(data, destination_signe, model_str):
+def destination_demand_constraints(data, model_str, destination_signe):
     """ Contraintes de demande pour chaque destination, incluant les arcs entrants et sortants."""
     for _, destination in data['destinations'].iterrows():
         demands = [destination[f'DEMAND_ITEM_{i}'] for i in range(data['items'])]
@@ -177,82 +245,8 @@ def destination_demand_constraints(data, destination_signe, model_str):
             model_str += f"{incoming_edge_str} {destination_signe} {total_demand}"
     return model_str
 
-def define_decision_variable_bounds(data, model_str):
-    """ Définit les bornes des variables de décision. """
-    for _, edge in data['edges'].iterrows():
-        model_str += f"0 <= x{edge['ID']} <= +inf\n"
-    return model_str
 
-def define_variable_types(data, model_str):
-    """ Définit le type des variables de décision. """
-    for _, edge in data['edges'].iterrows():
-        model_str += f"x{edge['ID']}\n"
-    return model_str
-
-def generate_disaggregated_model(data):
-    """Génère le modèle désagrégé."""
-    model_str = "Minimize\nobj:"
-    model_str = calculate_edge_costs_by_item(data, model_str)
-
-    model_str += "\n\nSubject To"
-    balance_status = verify_balanced_disaggregated(data)
-    
-    model_str = source_capacity_constraint_by_item(data, balance_status, model_str)
-
-    all_nodes = set(data['edges']['START']).union(set(data['edges']['END']))
-    sources = set(data['sources']['ID'])
-    destinations = set(data['destinations']['ID'])
-    intermediate_nodes = all_nodes - sources - destinations
-    model_str = intermediate_nodes_flow_constraints_by_item(data, intermediate_nodes, model_str)
-
-    model_str = destination_demand_constraints_by_item(data, balance_status, model_str)
-
-    model_str += "\n\nBounds\n"
-    model_str = define_decision_variable_bounds_by_item(data, model_str)
-    
-    model_str += "\nGenerals\n"
-    model_str = define_variable_types_by_item(data, model_str)
-
-    model_str += "\nEnd"
-    return model_str
-
-def verify_balanced_disaggregated(data):
-    """Vérifie si le problème est équilibré pour chaque type d'article."""
-    balance_status = {}
-
-    total_supply = {i: 0 for i in range(data['items'])}
-    total_demand = {i: 0 for i in range(data['items'])}
-
-    for _, df in data.items():
-        if isinstance(df, pd.DataFrame):
-            for i in range(data['items']):
-                capacity_columns = [col for col in df.columns if f'CAPACITY_ITEM_{i}' in col]
-                demand_columns = [col for col in df.columns if f'DEMAND_ITEM_{i}' in col]
-                
-                for col in capacity_columns:
-                    total_supply[i] += df[col].sum()
-                for col in demand_columns:
-                    total_demand[i] += df[col].sum()
-
-    for i in range(data['items']):
-        if total_supply[i] == total_demand[i]:
-            balance_status[i] = ("=", "=")
-        elif total_supply[i] > total_demand[i]:
-            balance_status[i] = ("<=", "=")
-        else:
-            balance_status[i] = ("=", "<=")
-
-    return balance_status
-    
-def calculate_edge_costs_by_item(data, model_str):
-    """Calcule et ajoute les coûts par arc et par type d'article."""
-    for _, edge in data['edges'].iterrows():
-        for i in range(data['items']):
-            cost = float(edge[f'COST_ITEM_{i}'])
-            model_str += f" {'-' if cost < 0 else '+'} {abs(cost)} x{edge['ID']}_{i}"
-    return model_str
-
-def source_capacity_constraint_by_item(data, balance_status, model_str):
+def source_capacity_constraint_by_item(data, model_str, balance_status):
     """Capacity constraints for each source and each item type, ensuring no overlap in edge IDs for in-flow and out-flow."""
     for _, source in data['sources'].iterrows():
         for i in range(data['items']):
@@ -276,8 +270,9 @@ def source_capacity_constraint_by_item(data, balance_status, model_str):
                 model_str += f"\ncap_{source['ID']}_{i}: {outgoing_edge_str} {balance_status[i][0]} {capacity}"
     return model_str
 
-def intermediate_nodes_flow_constraints_by_item(data, intermediate_nodes, model_str):
+def intermediate_nodes_flow_constraints_by_item(data, model_str):
     """Contraintes de conservation de flux pour chaque noeud intermédiaire et chaque type d'article."""
+    intermediate_nodes = get_intermediate_nodes(data)
     for node in intermediate_nodes:
         for i in range(data['items']):
             in_edges = data['edges'][data['edges']['END'] == node]
@@ -297,7 +292,7 @@ def intermediate_nodes_flow_constraints_by_item(data, intermediate_nodes, model_
 
     return model_str
 
-def destination_demand_constraints_by_item(data, balance_status, model_str):
+def destination_demand_constraints_by_item(data, model_str, balance_status):
     """Demand constraints for each destination and each item type, ensuring no overlap in edge IDs for incoming and outgoing flows."""
     for _, destination in data['destinations'].iterrows():
         for i in range(data['items']):
@@ -321,20 +316,6 @@ def destination_demand_constraints_by_item(data, balance_status, model_str):
                 model_str += f"\ndemand_{destination['ID']}_{i}: {incoming_edge_str} {balance_status[i][1]} {demand}"
     return model_str
 
-
-def define_decision_variable_bounds_by_item(data, model_str):
-    """Définit les bornes des variables de décision pour chaque arc et chaque type d'article."""
-    for _, edge in data['edges'].iterrows():
-        for i in range(data['items']):
-            model_str += f"0 <= x{edge['ID']}_{i} <= +inf\n"
-    return model_str
-
-def define_variable_types_by_item(data, model_str):
-    """Définit le type des variables de décision pour chaque arc et chaque type d'article."""
-    for _, edge in data['edges'].iterrows():
-        for i in range(data['items']):
-            model_str += f"x{edge['ID']}_{i}\n"
-    return model_str
 
 def save_model(data, filename, aggregated):
     """Sauvegarde le modèle dans un fichier."""
