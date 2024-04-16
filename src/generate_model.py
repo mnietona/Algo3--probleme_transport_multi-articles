@@ -4,7 +4,6 @@ import networkx as nx
 import matplotlib.pyplot as plt
 from statistics import median
 
-
 def plot_graph(data):
     """ Code pour afficher le graphe du problème. Donnée par ChatGpt """
     G = nx.DiGraph()
@@ -39,6 +38,7 @@ def read_section(file, nb_items, columns):
     return pd.DataFrame(data, columns=columns)
 
 def read_instance(filename):
+    """ Lit les données d'instance du fichier. """
     data = {}
     with open(filename, 'r') as file:
         for line in file:
@@ -54,17 +54,16 @@ def read_instance(filename):
                 data[key.lower()] = read_section(file, nb_items, header)
     return data
 
-def verify_balanced_aggregated(data):
-    """ Verifie si le problème agrégé est équilibré. """
-    return check_balance(data, 'CAPACITY', 'DEMAND')
-
-def verify_balanced_disaggregated(data):
-    """ Verifie si le problème désagrégé est équilibré. """
-    balance_status = {}
-    for i in range(data['items']):
-        balance_status[i] = check_balance(data, f'CAPACITY_ITEM_{i}', f'DEMAND_ITEM_{i}')
-    return balance_status
-
+def verify_balanced(data, aggregated=True):
+    """ Verifie si le problème est équilibré. """
+    if not aggregated:
+        balance_status = {}
+        for i in range(data['items']):
+            balance_status[i] = check_balance(data, f'CAPACITY_ITEM_{i}', f'DEMAND_ITEM_{i}')
+        return balance_status
+    else:
+        return check_balance(data, 'CAPACITY', 'DEMAND')
+    
 def check_balance(data, supply_key, demand_key):
     """ Vérifie si l'offre est égale à la demande. """
     total_supply = total_demand = 0
@@ -123,214 +122,126 @@ def define_variable_types(data, model_str, aggregated=True):
     return model_str
 
 def get_intermediate_nodes(data):
-        all_nodes = set(data['edges']['START']).union(set(data['edges']['END']))
-        sources = set(data['sources']['ID'])
-        destinations = set(data['destinations']['ID'])
-        intermediate_nodes = all_nodes - sources - destinations
-        return intermediate_nodes
+    """ Renvoie les nœuds intermédiaires du graphe. """
+    all_nodes = set(data['edges']['START']).union(set(data['edges']['END']))
+    sources = set(data['sources']['ID'])
+    destinations = set(data['destinations']['ID'])
+    intermediate_nodes = all_nodes - sources - destinations
+    return intermediate_nodes
 
-def generate_aggregated_model(data):
-    """Génère le modèle agrégé."""
+def get_edge_str(edges, ids, item_suffix=""):
+    """Crée un str de la forme 'x1 + x2 + ...' pour les arcs donnés."""
+    return " + ".join([f"x{edge_id}{item_suffix}" for edge_id in ids if edge_id in set(edges['ID'])])
+
+def clean_edge_str(outgoing_edge_str, incoming_edge_str):
+    """ Nettoie les str en supprimant les ID communs."""
+    all_edges = outgoing_edge_str.split(' + ') + incoming_edge_str.split(' + ')
+    edge_count = {}
+
+    for edge in all_edges:
+        if edge in edge_count:
+            edge_count[edge] += 1
+        else:
+            edge_count[edge] = 1
+
+    outgoing_edges_cleaned = ' + '.join(edge for edge in outgoing_edge_str.split(' + ') if edge_count[edge] == 1)
+    incoming_edges_cleaned = ' + '.join(edge for edge in incoming_edge_str.split(' + ') if edge_count[edge] == 1)
+
+    return outgoing_edges_cleaned, incoming_edges_cleaned
+
+def create_constraint_string(constraint_type, constraint_sign, node_id, suffix, outgoing_edge_str, incoming_edge_str, capacity_or_demand):
+    """ Crée une contrainte de capacité ou de demande pour un nœud donné. """
+    if 'source' in constraint_type:
+        incoming_edge_str = incoming_edge_str.replace('+', '-')
+        flow_expr = f"{outgoing_edge_str} - {incoming_edge_str}" if incoming_edge_str else f"{outgoing_edge_str}"
+        sign = constraint_sign[0] 
+    else:  # 'destination'
+        outgoing_edge_str = outgoing_edge_str.replace('+', '-')
+        flow_expr = f"{incoming_edge_str} - {outgoing_edge_str}" if outgoing_edge_str else f"{incoming_edge_str}"
+        sign = constraint_sign[1] 
+
+    constraint_name = 'cap' if 'source' in constraint_type else 'demand'
+    return f"\n{constraint_name}_{node_id}{suffix}: {flow_expr} {sign} {capacity_or_demand}"
+            
+def process_constraints(data, model_str, constraint_type, signes, aggregated=True):
+    """Traite les contraintes pour les sources et les destinations."""
+    nodes = data[constraint_type]
+    node_type_id = 'ID'
+    
+    for _, node in nodes.iterrows():
+        node_id = node[node_type_id]
+        item_range = range(data['items']) if not aggregated else [None]
+
+        for i in item_range:
+            suffix = f"_{i}" if not aggregated else ""
+            key = 'CAPACITY_ITEM_' if 'source' in constraint_type else 'DEMAND_ITEM_'
+            capacity_or_demand = node[f'{key}{i}'] if not aggregated else sum([node[f'{key}{j}'] for j in range(data['items'])])
+
+            outgoing_edges = data['edges'][data['edges']['START'] == node_id]
+            incoming_edges = data['edges'][data['edges']['END'] == node_id]
+
+            outgoing_edge_str = get_edge_str(outgoing_edges, outgoing_edges['ID'], suffix)
+            incoming_edge_str = get_edge_str(incoming_edges, incoming_edges['ID'], suffix)
+            
+            outgoing_edge_str, incoming_edge_str = clean_edge_str(outgoing_edge_str, incoming_edge_str)
+            constraint_sign = signes[i] if not aggregated else signes
+            
+            model_str += create_constraint_string(constraint_type, constraint_sign, node_id, suffix, outgoing_edge_str, incoming_edge_str, capacity_or_demand)
+
+    return model_str
+
+def intermediate_nodes_flow_constraints(data, model_str, aggregated=True):
+    """ Traite les contraintes de flux pour les nœuds intermédiaires. """
+    intermediate_nodes = get_intermediate_nodes(data)
+    for node in intermediate_nodes:
+        item_range = range(data['items']) if not aggregated else [None]
+        
+        for i in item_range:
+            suffix = f"_{i}" if not aggregated else ""
+        
+            incoming_edges = data['edges'][data['edges']['END'] == node]
+            outgoing_edges = data['edges'][data['edges']['START'] == node]
+            
+            incoming_edge_str = get_edge_str(incoming_edges, incoming_edges['ID'], suffix)
+            outgoing_edge_str = get_edge_str(outgoing_edges, outgoing_edges['ID'], suffix)
+            
+            incoming_edge_str, outgoing_edge_str = clean_edge_str(incoming_edge_str, outgoing_edge_str)
+            outgoing_edge_str = outgoing_edge_str.replace('+', '-')
+            
+            model_str += f"\nflow_{node}{suffix}: {incoming_edge_str} - {outgoing_edge_str} = 0"
+
+    return model_str
+
+def model_constraints(data, model_str, aggregated=True): 
+    """ Traite toutes les contraintes du modèle. """
+    balance_signs = verify_balanced(data, aggregated=aggregated)
+    model_str = process_constraints(data, model_str, 'sources', balance_signs, aggregated=aggregated)
+    model_str = intermediate_nodes_flow_constraints(data, model_str, aggregated=aggregated)
+    model_str = process_constraints(data, model_str, 'destinations', balance_signs, aggregated=aggregated)
+    return model_str
+
+def generate_model(data, aggregated):
+    """Génère le modèle linéaire, agrégé ou désagrégé."""
     model_str = "Minimize\nobj:"
-    model_str = calculate_edge_costs(data, model_str)
+    model_str = calculate_edge_costs(data, model_str, aggregated=aggregated)
 
     model_str += "\n\nSubject To"
-    source_sign, destination_sign = verify_balanced_aggregated(data)
-    model_str = source_capacity_constraint(data, model_str, source_sign)
-    
-    model_str = intermediate_nodes_flow_constraints(data, model_str)
-    
-    model_str = destination_demand_constraints(data, model_str, destination_sign,)
-    
+    model_str = model_constraints(data, model_str, aggregated=aggregated)
+
     model_str += "\n\nBounds\n"
-    model_str = define_decision_variable_bounds(data, model_str)
-    
+    model_str = define_decision_variable_bounds(data, model_str, aggregated=aggregated)
+
     model_str += "\nGenerals\n"
-    model_str = define_variable_types(data, model_str)
+    model_str = define_variable_types(data, model_str, aggregated=aggregated)
 
     model_str += "\nEnd"
     return model_str
-
-def generate_disaggregated_model(data):
-    """Génère le modèle désagrégé."""
-    model_str = "Minimize\nobj:"
-    model_str = calculate_edge_costs(data, model_str, aggregated=False)
-
-    model_str += "\n\nSubject To"
-    balance_status = verify_balanced_disaggregated(data)
-    
-    model_str = source_capacity_constraint_by_item(data, model_str, balance_status)
-    
-    model_str = intermediate_nodes_flow_constraints_by_item(data, model_str)
-
-    model_str = destination_demand_constraints_by_item(data, model_str, balance_status)
-
-    model_str += "\n\nBounds\n"
-    model_str = define_decision_variable_bounds(data, model_str, aggregated=False)
-    
-    model_str += "\nGenerals\n"
-    model_str = define_variable_types(data, model_str, aggregated=False)
-    
-    model_str += "\nEnd"
-    return model_str
-
-
-def source_capacity_constraint(data, model_str, source_signe):
-    """Capacity constraints for each source, accounting for incoming and outgoing edges."""
-    for _, source in data['sources'].iterrows():
-        total_capacity = sum([source[f'CAPACITY_ITEM_{i}'] for i in range(data['items'])])
-        model_str += f"\ncap_{source['ID']}: "
-
-        outgoing_edges = data['edges'][data['edges']['START'] == source['ID']]
-        incoming_edges = data['edges'][data['edges']['END'] == source['ID']]
-        
-        outgoing_edge_ids = set(outgoing_edges['ID'])
-        incoming_edge_ids = set(incoming_edges['ID'])
-
-        common_edge_ids = outgoing_edge_ids & incoming_edge_ids
-        outgoing_edge_ids -= common_edge_ids
-        incoming_edge_ids -= common_edge_ids
-
-        outgoing_edge_str = " + ".join([f"x{edge_id}" for edge_id in outgoing_edge_ids])
-        incoming_edge_str = " - ".join([f"x{edge_id}" for edge_id in incoming_edge_ids])
-
-        if incoming_edge_str:
-            model_str += f"{outgoing_edge_str} - {incoming_edge_str} {source_signe} {total_capacity}"
-        else:
-            model_str += f"{outgoing_edge_str} {source_signe} {total_capacity}"
-    return model_str
-
-def intermediate_nodes_flow_constraints(data, model_str):
-    """ Contraintes de conservation de flux pour chaque noeud intermédiaire."""
-    intermediate_nodes = get_intermediate_nodes(data)
-    for node in intermediate_nodes:
-        in_edges = data['edges'][data['edges']['END'] == node]
-        out_edges = data['edges'][data['edges']['START'] == node]
-        in_edge_ids = {edge['ID'] for _, edge in in_edges.iterrows()}
-        out_edge_ids = {edge['ID'] for _, edge in out_edges.iterrows()}
-
-        common_edge_ids = in_edge_ids & out_edge_ids
-        in_edge_ids -= common_edge_ids
-        out_edge_ids -= common_edge_ids
-
-        in_flow_str = " + ".join([f"x{edge_id}" for edge_id in in_edge_ids])
-        out_flow_str = " - ".join([f"x{edge_id}" for edge_id in out_edge_ids])
-
-        model_str += f"\nflow_cons_{node}: {in_flow_str} - {out_flow_str} = 0"
-    return model_str
-
-def destination_demand_constraints(data, model_str, destination_signe):
-    """ Contraintes de demande pour chaque destination, incluant les arcs entrants et sortants."""
-    for _, destination in data['destinations'].iterrows():
-        demands = [destination[f'DEMAND_ITEM_{i}'] for i in range(data['items'])]
-        total_demand = sum(demands)
-        model_str += f"\ndemand_{destination['ID']}: "
-
-        incoming_edges = data['edges'][data['edges']['END'] == destination['ID']]
-        outgoing_edges = data['edges'][data['edges']['START'] == destination['ID']]
-        
-        outgoing_edge_ids = set(outgoing_edges['ID'])
-        incoming_edge_ids = set(incoming_edges['ID'])
-
-        common_edge_ids = outgoing_edge_ids & incoming_edge_ids
-        outgoing_edge_ids -= common_edge_ids
-        incoming_edge_ids -= common_edge_ids
-
-        incoming_edge_str = " + ".join([f"x{edge_id}" for edge_id in incoming_edge_ids])
-        outgoing_edge_str = " - ".join([f"x{edge_id}" for edge_id in outgoing_edge_ids])
-        
-        if outgoing_edge_str:
-            model_str += f"{incoming_edge_str} - {outgoing_edge_str} {destination_signe} {total_demand}"
-        else:
-            model_str += f"{incoming_edge_str} {destination_signe} {total_demand}"
-    return model_str
-
-
-def source_capacity_constraint_by_item(data, model_str, balance_status):
-    """Capacity constraints for each source and each item type, ensuring no overlap in edge IDs for in-flow and out-flow."""
-    for _, source in data['sources'].iterrows():
-        for i in range(data['items']):
-            capacity = source[f'CAPACITY_ITEM_{i}']
-            outgoing_edges = data['edges'][data['edges']['START'] == source['ID']]
-            incoming_edges = data['edges'][data['edges']['END'] == source['ID']]
-
-            outgoing_edge_ids = set(outgoing_edges['ID'])
-            incoming_edge_ids = set(incoming_edges['ID'])
-
-            common_edge_ids = outgoing_edge_ids & incoming_edge_ids
-            outgoing_edge_ids -= common_edge_ids
-            incoming_edge_ids -= common_edge_ids
-
-            outgoing_edge_str = " + ".join([f"x{edge.ID}_{i}" for edge in outgoing_edges.itertuples() if edge.ID in outgoing_edge_ids])
-            incoming_edge_str = " - ".join([f"x{edge.ID}_{i}" for edge in incoming_edges.itertuples() if edge.ID in incoming_edge_ids])
-
-            if incoming_edge_str:
-                model_str += f"\ncap_{source['ID']}_{i}: {outgoing_edge_str} - {incoming_edge_str} {balance_status[i][0]} {capacity}"
-            else:
-                model_str += f"\ncap_{source['ID']}_{i}: {outgoing_edge_str} {balance_status[i][0]} {capacity}"
-    return model_str
-
-def intermediate_nodes_flow_constraints_by_item(data, model_str):
-    """Contraintes de conservation de flux pour chaque noeud intermédiaire et chaque type d'article."""
-    intermediate_nodes = get_intermediate_nodes(data)
-    for node in intermediate_nodes:
-        for i in range(data['items']):
-            in_edges = data['edges'][data['edges']['END'] == node]
-            out_edges = data['edges'][data['edges']['START'] == node]
-            
-            in_edge_ids = {edge['ID'] for _, edge in in_edges.iterrows()}
-            out_edge_ids = {edge['ID'] for _, edge in out_edges.iterrows()}
-            
-            common_edge_ids = in_edge_ids & out_edge_ids
-            in_edge_ids -= common_edge_ids
-            out_edge_ids -= common_edge_ids
-            
-            in_flow_str = " + ".join([f"x{edge_id}_{i}" for edge_id in in_edge_ids])
-            out_flow_str = " - ".join([f"x{edge_id}_{i}" for edge_id in out_edge_ids])
-            
-            model_str += f"\nflow_cons_{node}_{i}: {in_flow_str} - {out_flow_str} = 0"
-
-    return model_str
-
-def destination_demand_constraints_by_item(data, model_str, balance_status):
-    """Demand constraints for each destination and each item type, ensuring no overlap in edge IDs for incoming and outgoing flows."""
-    for _, destination in data['destinations'].iterrows():
-        for i in range(data['items']):
-            demand = destination[f'DEMAND_ITEM_{i}']
-            incoming_edges = data['edges'][data['edges']['END'] == destination['ID']]
-            outgoing_edges = data['edges'][data['edges']['START'] == destination['ID']]
-
-            incoming_edge_ids = set(incoming_edges['ID'])
-            outgoing_edge_ids = set(outgoing_edges['ID'])
-
-            common_edge_ids = incoming_edge_ids & outgoing_edge_ids
-            incoming_edge_ids -= common_edge_ids
-            outgoing_edge_ids -= common_edge_ids
-
-            incoming_edge_str = " + ".join([f"x{edge.ID}_{i}" for edge in incoming_edges.itertuples() if edge.ID in incoming_edge_ids])
-            outgoing_edge_str = " - ".join([f"x{edge.ID}_{i}" for edge in outgoing_edges.itertuples() if edge.ID in outgoing_edge_ids])
-
-            if outgoing_edge_str:
-                model_str += f"\ndemand_{destination['ID']}_{i}: {incoming_edge_str} - {outgoing_edge_str} {balance_status[i][1]} {demand}"
-            else:
-                model_str += f"\ndemand_{destination['ID']}_{i}: {incoming_edge_str} {balance_status[i][1]} {demand}"
-    return model_str
-
 
 def save_model(data, filename, aggregated):
     """Sauvegarde le modèle dans un fichier."""
-    if aggregated:
-        model_str = generate_aggregated_model(data)
-    else:
-        model_str = generate_disaggregated_model(data)
+    model_str = generate_model(data, aggregated)
     with open(filename, 'w') as file:
         file.write(model_str)
-
-def print_data(data):
-    for key, value in data.items():
-        print(key)
-        print(value)
-        print()
 
 def main():
     if len(sys.argv) != 3:
@@ -344,16 +255,19 @@ def main():
     # Lire les données d'instance
     data = read_instance(instance_filename)
     
-
+    # Demander à l'utilisateur s'il veut un graph
+    print("Voulez-vous afficher le graphe du problème ? (y/n)")
+    user_input = input()
+    if user_input == 'y':
+        plot_graph(data)
+    
     # Générer le fichier .lp
     lp_filename =  f"{filename[:-4]}_{sys.argv[2]}.lp"
     save_model(data, lp_filename, aggregated)
     
-    # Déplacer le fichier dans le dossier parent 
+    # Déplacer le fichier dans le dossier parent  #### A RETIRER POUR LA REMISE
     import shutil
     shutil.move(lp_filename, f"../{lp_filename}")
-    
-    #plot_graph(data)
     
 if __name__ == "__main__":
     main()
