@@ -54,6 +54,29 @@ def read_instance(filename):
                 data[key.lower()] = read_section(file, nb_items, header)
     return data
 
+def save_model(data, filename, aggregated):
+    """Sauvegarde le modèle dans un fichier."""
+    model_str = generate_model(data, aggregated)
+    with open(filename, 'w') as file:
+        file.write(model_str)
+
+def generate_model(data, aggregated):
+    """Génère le modèle linéaire, agrégé ou désagrégé."""
+    model_str = "Minimize\nobj:"
+    model_str = calculate_edge_costs(data, model_str, aggregated=aggregated)
+
+    model_str += "\n\nSubject To"
+    model_str = model_constraints(data, model_str, aggregated=aggregated)
+
+    model_str += "\n\nBounds\n"
+    model_str = define_decision_variable_bounds(data, model_str, aggregated=aggregated)
+
+    model_str += "\nGenerals\n"
+    model_str = define_variable_types(data, model_str, aggregated=aggregated)
+
+    model_str += "\nEnd"
+    return model_str
+
 def verify_balanced(data, aggregated=True):
     """ Verifie si le problème est équilibré. """
     if not aggregated:
@@ -220,28 +243,6 @@ def model_constraints(data, model_str, aggregated=True):
     model_str = process_constraints(data, model_str, 'destinations', balance_signs, aggregated=aggregated)
     return model_str
 
-def generate_model(data, aggregated):
-    """Génère le modèle linéaire, agrégé ou désagrégé."""
-    model_str = "Minimize\nobj:"
-    model_str = calculate_edge_costs(data, model_str, aggregated=aggregated)
-
-    model_str += "\n\nSubject To"
-    model_str = model_constraints(data, model_str, aggregated=aggregated)
-
-    model_str += "\n\nBounds\n"
-    model_str = define_decision_variable_bounds(data, model_str, aggregated=aggregated)
-
-    model_str += "\nGenerals\n"
-    model_str = define_variable_types(data, model_str, aggregated=aggregated)
-
-    model_str += "\nEnd"
-    return model_str
-
-def save_model(data, filename, aggregated):
-    """Sauvegarde le modèle dans un fichier."""
-    model_str = generate_model(data, aggregated)
-    with open(filename, 'w') as file:
-        file.write(model_str)
 
 def main():
     if len(sys.argv) != 3:
