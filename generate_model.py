@@ -77,35 +77,6 @@ def generate_model(data, aggregated):
     model_str += "\nEnd"
     return model_str
 
-def verify_balanced(data, aggregated=True):
-    """ Verifie si le problème est équilibré. """
-    if not aggregated:
-        balance_status = {}
-        for i in range(data['items']):
-            balance_status[i] = check_balance(data, f'CAPACITY_ITEM_{i}', f'DEMAND_ITEM_{i}')
-        return balance_status
-    else:
-        return check_balance(data, 'CAPACITY', 'DEMAND')
-    
-def check_balance(data, supply_key, demand_key):
-    """ Vérifie si l'offre est égale à la demande. """
-    total_supply = total_demand = 0
-    for _, df in data.items():
-        if isinstance(df, pd.DataFrame):
-            supply_columns = [col for col in df.columns if supply_key in col]
-            demand_columns = [col for col in df.columns if demand_key in col]
-            for col in supply_columns:
-                total_supply += df[col].sum()
-            for col in demand_columns:
-                total_demand += df[col].sum()
-    
-    if total_supply == total_demand:
-        return "=", "="
-    elif total_supply > total_demand:
-        return "<=", "="
-    else:
-        return "=", "<="
-
 def calculate_edge_costs(data, model_str, aggregated=True):
     """
     Calcule et ajoute les coûts par arc.
@@ -151,21 +122,21 @@ def clean_edge_str(outgoing_edge_str, incoming_edge_str):
 
     return outgoing_edges_cleaned, incoming_edges_cleaned
 
-def create_constraint_string(constraint_type, constraint_sign, node_id, suffix, outgoing_edge_str, incoming_edge_str, capacity_or_demand):
+def create_constraint_string(constraint_type, node_id, suffix, outgoing_edge_str, incoming_edge_str, capacity_or_demand):
     """ Crée une contrainte de capacité ou de demande pour un nœud donné. """
     if 'source' in constraint_type:
         incoming_edge_str = incoming_edge_str.replace('+', '-')
         flow_expr = f"{outgoing_edge_str} - {incoming_edge_str}" if incoming_edge_str else f"{outgoing_edge_str}"
-        sign = constraint_sign[0] 
+        sign = "<="
     else:  # 'destination'
         outgoing_edge_str = outgoing_edge_str.replace('+', '-')
         flow_expr = f"{incoming_edge_str} - {outgoing_edge_str}" if outgoing_edge_str else f"{incoming_edge_str}"
-        sign = constraint_sign[1] 
-
+        sign = "="
+        
     constraint_name = 'cap' if 'source' in constraint_type else 'demand'
     return f"\n{constraint_name}_{node_id}{suffix}: {flow_expr} {sign} {capacity_or_demand}"
             
-def process_constraints(data, model_str, constraint_type, signes, aggregated=True):
+def process_constraints(data, model_str, constraint_type, aggregated=True):
     """Traite les contraintes pour les sources et les destinations."""
     nodes = data[constraint_type]
     node_type_id = 'ID'
@@ -186,9 +157,8 @@ def process_constraints(data, model_str, constraint_type, signes, aggregated=Tru
             incoming_edge_str = get_edge_str(incoming_edges, incoming_edges['ID'], suffix)
             
             outgoing_edge_str, incoming_edge_str = clean_edge_str(outgoing_edge_str, incoming_edge_str)
-            constraint_sign = signes[i] if not aggregated else signes
             
-            model_str += create_constraint_string(constraint_type, constraint_sign, node_id, suffix, outgoing_edge_str, incoming_edge_str, capacity_or_demand)
+            model_str += create_constraint_string(constraint_type, node_id, suffix, outgoing_edge_str, incoming_edge_str, capacity_or_demand)
 
     return model_str
 
@@ -216,10 +186,9 @@ def intermediate_nodes_flow_constraints(data, model_str, aggregated=True):
 
 def model_constraints(data, model_str, aggregated=True): 
     """ Traite toutes les contraintes du modèle. """
-    balance_signs = verify_balanced(data, aggregated=aggregated)
-    model_str = process_constraints(data, model_str, 'sources', balance_signs, aggregated=aggregated)
+    model_str = process_constraints(data, model_str, 'sources', aggregated=aggregated)
     model_str = intermediate_nodes_flow_constraints(data, model_str, aggregated=aggregated)
-    model_str = process_constraints(data, model_str, 'destinations', balance_signs, aggregated=aggregated)
+    model_str = process_constraints(data, model_str, 'destinations', aggregated=aggregated)
     return model_str
 
 def define_decision_variable_bounds(data, model_str, aggregated=True):

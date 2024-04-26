@@ -41,7 +41,7 @@ RESULTS = {
     "25_3_alidade_0": 4709596,
     "25_3_alidade_1": 0,
     "25_4_ducdame_0": 4052795.5,
-    "25_4_ducdame_1": 4024750,
+    "25_4_ducdame_1": 0,
     "26_2_brutifying_0": 2294785,
     "26_2_brutifying_1": 2307654,
     "26_3_bepraiser_0": 2869977,
