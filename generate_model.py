@@ -99,7 +99,6 @@ def check_balance(data, supply_key, demand_key):
             for col in demand_columns:
                 total_demand += df[col].sum()
     
-
     if total_supply == total_demand:
         return "=", "="
     elif total_supply > total_demand:
@@ -254,20 +253,12 @@ def main():
 
     # Lire les données d'instance
     data = read_instance(instance_filename)
-    
-    # Demander à l'utilisateur s'il veut un graph
-    print("Voulez-vous afficher le graphe du problème ? (y/n)")
-    user_input = input()
-    if user_input == 'y':
-        plot_graph(data)
+
+    #plot_graph(data)
     
     # Générer le fichier .lp
     lp_filename =  f"{filename[:-4]}_{sys.argv[2]}.lp"
     save_model(data, lp_filename, aggregated)
-    
-    # Déplacer le fichier dans le dossier parent  #### A RETIRER POUR LA REMISE
-    import shutil
-    shutil.move(lp_filename, f"../{lp_filename}")
     
 if __name__ == "__main__":
     main()

@@ -6,7 +6,7 @@ RESET=\033[0m
 F = 22
 P = 0
 
-FILES = $(sort $(wildcard ./instances/*.txt))
+FILES = $(sort $(wildcard instances/*.txt))
 FILE = $(word $(F), $(FILES))
 BASENAME = $(basename $(notdir $(FILE)))
 
@@ -16,10 +16,10 @@ all: main solve
 
 main:
 	@echo "$(YELLOW)Generating ...$(RESET)"
-	cd src && python3 generate_model.py .$(FILE) $(P)
+	python3 generate_model.py $(FILE) $(P)
 solve:
 	@echo "$(YELLOW)Solving ...$(RESET)"
 	glpsol --lp $(LPNAME) -o $(OUTNAME)
 clean:
 	@echo "$(YELLOW)Cleaning ...$(RESET)"
-	@rm -f *.lp *.sol
+	@rm -f *.lp *.sol; find . -type d -name __pycache__ -exec rm -r {} \+; find . -type d -name .pytest_cache -exec rm -r {} \+
