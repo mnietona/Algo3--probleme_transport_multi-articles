@@ -11,14 +11,14 @@ def create_venv():
 
 def install_dependencies():
     # Vérifie si le fichier requirements.txt existe
-    if not os.path.exists("requirements.txt"):
+    if not os.path.exists("installation/requirements.txt"):
         return
 
     # Utilise le pip de l'environnement virtuel pour installer les dépendances
     venv_pip = os.path.join("env", "Scripts", "pip") if platform.system() == "Windows" else os.path.join("env", "bin", "pip")
     
     # Installer les dépendances
-    subprocess.run([venv_pip, "install", "-r", "requirements.txt"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    subprocess.run([venv_pip, "install", "-r", "installation/requirements.txt"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 def main():
     create_venv()
