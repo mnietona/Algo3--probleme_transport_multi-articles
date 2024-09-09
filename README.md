@@ -14,6 +14,9 @@ Les objectifs sont :
    - **Approche Agrégée** : Considère les différents types d'articles comme une seule entité en sommant les capacités, les demandes et en prenant le coût médian.
    - **Approche Désagrégée** : Prend en compte les caractéristiques spécifiques de chaque type d'article pour une planification plus précise.
 
+## Rapport
+Un rapport détaillé sur le projet est disponible. Vous pouvez le consulter [ici](rapport.pdf).
+
 ## Activation
 Lancez `source active.sh` pour exécuter le script Python, créer et activer l'environnement virtuel.
 
