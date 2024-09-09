@@ -34,7 +34,7 @@ python3 generate_model <fichier_entree> <p>
 1. **Générer un modèle agrégé** :
 
    ```bash
-   python3 generate_model 20_2_nonvalidly.txt 0
+   python3 generate_model.py instances/20_2_nonvalidly.txt 0
    ```
 
    Cette commande génère un fichier .lp pour le modèle agrégé à partir du fichier d'entrée.
@@ -42,7 +42,7 @@ python3 generate_model <fichier_entree> <p>
 2. **Générer un modèle désagrégé** :
 
    ```bash
-   python3 generate_model 20_2_nonvalidly.txt 1
+   python3 generate_model.py instances/20_2_nonvalidly.txt 1
    ```
 
    Cette commande génère un fichier .lp pour le modèle désagrégé à partir du fichier d'entrée.
