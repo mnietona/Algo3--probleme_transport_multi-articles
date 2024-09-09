@@ -14,21 +14,10 @@ Les objectifs sont :
    - **Approche Agrégée** : Considère les différents types d'articles comme une seule entité en sommant les capacités, les demandes et en prenant le coût médian.
    - **Approche Désagrégée** : Prend en compte les caractéristiques spécifiques de chaque type d'article pour une planification plus précise.
 
-## Dépendances
-
-Ce projet utilise les bibliothèques suivantes :
-- **Pandas** (`^2.2.1`) : Pour la manipulation et l'analyse des données.
-- **NetworkX** (`^3.2.1`) : Pour la création, la manipulation et l'étude des structures de graphes.
-- **Matplotlib** (`^3.8.3`) : Pour la création de visualisations graphiques.
-
-Vous pouvez installer ces dépendances en utilisant `pip` :
-
-```bash
-pip install pandas==2.2.1 networkx==3.2.1 matplotlib==3.8.3
-```
+## Activation
+Lancez `source active.sh` pour exécuter le script Python, créer et activer l'environnement virtuel.
 
 ## Utilisation
-
 Pour générer le modèle, utilisez la commande suivante :
 
 ```bash
